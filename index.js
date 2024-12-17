@@ -48,7 +48,12 @@ async function run() {
 
     // get all job to database
     app.get("/jobs", async (req, res) => {
-      const cursor = jobsCollection.find();
+      const email = req.query.email;
+      let query = {};
+      if (email) {
+        query = { hr_email: email };
+      }
+      const cursor = jobsCollection.find(query);
       const result = await cursor.toArray();
       res.send(result);
     });
@@ -61,6 +66,13 @@ async function run() {
       res.send(result);
     });
 
+    // creat a new job
+    app.post("/jobs", async (req, res) => {
+      const newJob = req.body;
+      const result = await jobsCollection.insertOne(newJob);
+      res.send(result);
+    });
+
     // Job applicant related apis
     app.get("/job-application", async (req, res) => {
       const email = req.query.email;
@@ -69,8 +81,8 @@ async function run() {
 
       // fokira way
       for (const application of result) {
-        console.log(application.job_id);
-        const query1 = {_id: new ObjectId(application.job_id)};
+        // console.log(application.job_id);
+        const query1 = { _id: new ObjectId(application.job_id) };
         const job = await jobsCollection.findOne(query1);
         if (job) {
           application.title = job.title;
@@ -83,11 +95,54 @@ async function run() {
       res.send(result);
     });
 
+    app.get("/job-application/jobs/:job_id", async (req, res) => {
+      const jobId = req.params.job_id;
+      console.log(jobId);
+      const query = { job_id: jobId };
+
+      const result = await jobApplicationCollection.find(query).toArray();
+      res.send(result);
+    });
+
     app.post("/job-applications", async (req, res) => {
       const application = req.body;
       const result = await jobApplicationCollection.insertOne(application);
+      // optional
+      const id = application.job_id;
+      const query = { _id: new ObjectId(id) };
+      const job = await jobsCollection.findOne(query);
+      // console.log(job)
+      let newCount = 0;
+      if (job.applicationCount) {
+        newCount = job.applicationCount + 1;
+      } else {
+        newCount = 1;
+      }
+      // now update job info
+      const filter = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: {
+          applicationCount: newCount,
+        },
+      };
+      const updateResult = await jobsCollection.updateOne(filter, updateDoc);
+
       res.send(result);
     });
+    
+    //  updat to patch
+    app.patch("/job-applications/:id", async(req, res)=>{
+      const id = req.params.id;
+      const data = req.body;
+      const filter = {_id: new ObjectId(id)};
+      const updateDoc = {
+        $set: {
+          status: data.status,
+        }
+      };
+      const result = await jobApplicationCollection.updateOne(filter, updateDoc);
+      res.send(result)
+    })
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
