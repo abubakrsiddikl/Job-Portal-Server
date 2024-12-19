@@ -1,13 +1,40 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
+const cookieParser = require("cookie-parser");
 const app = express();
 const port = process.env.PORT || 5000;
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 // use middle ware
-app.use(cors());
+app.use(
+  cors({
+    origin: ["http://localhost:5173"],
+    credentials: true,
+  })
+);
 app.use(express.json());
+app.use(cookieParser());
+
+const logger = (req, res, next) => {
+  console.log("logger in");
+  next();
+};
+
+const verifyToken = (req, res, next) => {
+  const token = req?.cookies?.token;
+  if (!token) {
+    return res.status(401).send({ message: "UnAuthorized access" });
+  }
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(401).send({ message: "unAuthorized aceess" });
+    }
+    req.user = decoded;
+    next();
+  });
+};
 
 // root get operation
 app.get("/", (req, res) => {
@@ -46,8 +73,23 @@ async function run() {
       .db("jobPortal")
       .collection("job_applications");
 
+    // Auth Related APIs
+    app.post("/jwt", async (req, res) => {
+      const user = req.body;
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
+        expiresIn: "5h",
+      });
+      res
+        .cookie("token", token, {
+          httpOnly: true,
+          secure: false, //this true is production level
+        })
+        .send({ success: true });
+    });
+
     // get all job to database
-    app.get("/jobs", async (req, res) => {
+    app.get("/jobs", logger, async (req, res) => {
+      console.log("logger out ");
       const email = req.query.email;
       let query = {};
       if (email) {
@@ -74,9 +116,13 @@ async function run() {
     });
 
     // Job applicant related apis
-    app.get("/job-application", async (req, res) => {
+    app.get("/job-application", verifyToken, async (req, res) => {
+      // console.log("virify token out")
       const email = req.query.email;
       const query = { applcant_email: email };
+      if (req.user.email !== req.query.email) {
+        return res.status(403).send({message: "Forbeddin acess"})
+      }
       const result = await jobApplicationCollection.find(query).toArray();
 
       // fokira way
@@ -129,20 +175,23 @@ async function run() {
 
       res.send(result);
     });
-    
+
     //  updat to patch
-    app.patch("/job-applications/:id", async(req, res)=>{
+    app.patch("/job-applications/:id", async (req, res) => {
       const id = req.params.id;
       const data = req.body;
-      const filter = {_id: new ObjectId(id)};
+      const filter = { _id: new ObjectId(id) };
       const updateDoc = {
         $set: {
           status: data.status,
-        }
+        },
       };
-      const result = await jobApplicationCollection.updateOne(filter, updateDoc);
-      res.send(result)
-    })
+      const result = await jobApplicationCollection.updateOne(
+        filter,
+        updateDoc
+      );
+      res.send(result);
+    });
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
